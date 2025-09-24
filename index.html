@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>画像に番号マーカーを配置</title>
+    <style>
+      :root {
+        --margin: 32px;
+        --header-height: 56px;
+        --marker-size: 24px;
+        --marker-bg: #90E03F;
+        --marker-fg: #FFFFFF;
+      }
+
+      * {
+        box-sizing: border-box
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+        background: #0b0b0c;
+        color: #e5e7eb;
+      }
+
+      header {
+        position: fixed;
+        inset: 0 auto auto 0;
+        right: 0;
+        height: var(--header-height);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 16px;
+        background: rgba(15, 15, 17, .85);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid rgba(255, 255, 255, .08);
+        z-index: 1001;
+      }
+
+      header input[type="file"] {
+        color: #e5e7eb;
+      }
+
+      header .hint {
+        font-size: 12px;
+        color: #9ca3af
+      }
+
+      .stage {
+        position: absolute;
+        inset: var(--margin);
+        top: calc(var(--header-height) + var(--margin));
+        border: 1px dashed rgba(255, 255, 255, .14);
+        border-radius: 16px;
+        overflow: hidden;
+        display: grid;
+        /* place-items: center; */
+        justify-content: center;
+        background: #111214;
+      }
+
+      /* 画像は contain で表示。実際の描画矩形は JS で取得して使う */
+      #img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+
+      /* マーカー */
+      .marker {
+        position: absolute;
+        width: var(--marker-size);
+        height: var(--marker-size);
+        border-radius: 100%;
+        background-color: var(--marker-bg);
+        color: var(--marker-fg);
+        font-size: 12px;
+        font-weight: 700;
+        display: grid;
+        place-items: center;
+        /* box-shadow: 0 4px 18px rgba(0, 0, 0, .35), inset 0 0 0 1px rgba(0, 0, 0, .2); */
+        user-select: none;
+        cursor: pointer;
+        transform: translate(-50%, -50%);
+        z-index: 10;
+      }
+
+      .marker:active {
+        /* cursor: grabbing */
+      }
+
+      .marker[data-dragging="true"] {
+        outline: 2px solid rgba(255, 255, 255, .5)
+      }
+
+      /* ダイアログ（カスタムポップオーバー） */
+      .dialog {
+        position: absolute;
+        min-width: 220px;
+        background: #181a1f;
+        color: #e5e7eb;
+        border: 1px solid rgba(255, 255, 255, .1);
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .5);
+        z-index: 1000;
+        display: none;
+      }
+
+      .dialog.open {
+        display: block
+      }
+
+      .dialog h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: #cbd5e1;
+        font-weight: 600
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px
+      }
+
+      .row input[type="number"] {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        background: #0f1115;
+        color: #e5e7eb
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end
+      }
+
+      button {
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        background: #0f1115;
+        color: #e5e7eb;
+        cursor: pointer
+      }
+
+      button.primary {
+        background: #2563eb;
+        border-color: #2563eb;
+        color: white
+      }
+
+      button.danger {
+        background: #ef4444;
+        border-color: #ef4444;
+        color: white
+      }
+
+      .empty-hint {
+        color: #9ca3af;
+        font-size: 14px;
+        text-align: center;
+        line-height: 1.8;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <input id="file" type="file" accept="image/*" />
+      <button id="resetBtn" class="danger">リセット</button>
+      <div class="hint">画像を選択 → 画像内の任意の場所をクリックでマーカー作成（ダイアログが閉じているときのみ） / マーカーはドラッグで移動</div>
+    </header>
+
+    <div id="stage" class="stage" aria-label="キャンバス">
+      <div id="empty" class="empty-hint">ここに画像を読み込んでください<br />余白は常に margin: 32px で確保されます。</div>
+      <img id="img" alt="選択画像" hidden />
+    </div>
+
+    <!-- マーカー編集ダイアログ -->
+    <div id="dialog" class="dialog" role="dialog" aria-modal="false">
+      <h3>マーカーを編集</h3>
+      <div class="row">
+        <label for="num" style="font-size:12px;color:#94a3b8;width:64px">番号</label>
+        <input id="num" type="number" min="1" step="1" />
+      </div>
+      <div class="actions">
+        <button id="deleteBtn" class="danger">削除</button>
+        <button id="saveBtn" class="primary">保存</button>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const file = document.getElementById('file');
+        const stage = document.getElementById('stage');
+        const img = document.getElementById('img');
+        const empty = document.getElementById('empty');
+
+        const dialog = document.getElementById('dialog');
+        const numInput = document.getElementById('num');
+        const saveBtn = document.getElementById('saveBtn');
+        const deleteBtn = document.getElementById('deleteBtn');
+
+        let currentDialogTarget = null; // 現在編集中のマーカー要素
+        let wasDragging = false;
+
+        let markers = new Map(); // id => {el, x, y, number}
+
+        function dialogOpen() { return dialog.classList.contains('open'); }
+        function openDialogFor(markerEl, clientX, clientY) {
+          currentDialogTarget = markerEl;
+          const n = markerEl.dataset.number ? parseInt(markerEl.dataset.number, 10) : '';
+          numInput.value = n;
+          positionDialogNear(markerEl, clientX, clientY);
+          dialog.classList.add('open');
+          setTimeout(() => { numInput.focus(); numInput.select(); }, 0);
+        }
+        function closeDialog() {
+          dialog.classList.remove('open');
+          currentDialogTarget = null;
+        }
+        function positionDialogNear(targetEl, clientX, clientY) {
+          const rect = stage.getBoundingClientRect();
+          const dRect = dialog.getBoundingClientRect();
+          // 目標位置はクリック点 or マーカー位置の少し右下
+          let x = clientX ?? (rect.left + parseFloat(targetEl.style.left));
+          let y = clientY ?? (rect.top + parseFloat(targetEl.style.top));
+          x += 12; y += 12;
+          // 画面外にはみ出さないように
+          const maxX = rect.right - dRect.width - 8;
+          const maxY = rect.bottom - dRect.height - 8;
+          const minX = rect.left + 8;
+          const minY = rect.top + 8;
+          x = Math.min(maxX, Math.max(minX, x));
+          y = Math.min(maxY, Math.max(minY, y));
+          dialog.style.left = x + 'px';
+          dialog.style.top = y + 'px';
+        }
+
+        function imageRect() { return img.getBoundingClientRect(); }
+
+        function nextNumber() {
+          const used = new Set();
+          for (const m of markers.values()) {
+            const n = parseInt(m.el.dataset.number, 10);
+            if (Number.isFinite(n) && n > 0) used.add(n);
+          }
+          let i = 1;
+          while (used.has(i)) i++;
+          return i;
+        }
+
+        function withinImage(clientX, clientY) {
+          const r = imageRect();
+          return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+        }
+
+        function toImageLocal(clientX, clientY) {
+          const r = imageRect();
+          return { x: clientX - r.left, y: clientY - r.top, rect: r };
+        }
+
+        function clamp(val, min, max) { return Math.min(max, Math.max(min, val)); }
+
+        function createMarkerAt(clientX, clientY) {
+          if (!withinImage(clientX, clientY)) return;
+          const { x, y, rect } = toImageLocal(clientX, clientY);
+          const id = crypto.randomUUID();
+          const el = document.createElement('div');
+          el.className = 'marker';
+          el.dataset.id = id;
+          const number = nextNumber();
+          el.dataset.number = String(number);
+          el.textContent = String(number);
+
+          // 初期位置（中心基準）
+          const cx = clamp(x, 0, rect.width);
+          const cy = clamp(y, 0, rect.height);
+          el.style.left = cx + 'px';
+          el.style.top = cy + 'px';
+
+          // イベント
+          el.addEventListener('pointerdown', startDrag);
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (wasDragging) return;
+            openDialogFor(el, e.clientX, e.clientY);
+          });
+
+          stage.appendChild(el);
+          markers.set(id, { el, x: cx, y: cy });
+        }
+
+        // ドラッグ処理（Pointer Events）
+        let dragState = null; // {el, offsetX, offsetY}
+        function startDrag(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const el = e.currentTarget;
+          const r = imageRect();
+          const elRect = el.getBoundingClientRect();
+          el.setPointerCapture(e.pointerId);
+          el.dataset.dragging = 'true';
+          dragState = {
+            el,
+            startLeft: parseFloat(el.style.left),
+            startTop: parseFloat(el.style.top),
+            startX: e.clientX,
+            startY: e.clientY,
+            bounds: r
+          };
+          wasDragging = false;
+        }
+        function onDrag(e) {
+          if (!dragState) return;
+          wasDragging = true;
+          const dx = e.clientX - dragState.startX;
+          const dy = e.clientY - dragState.startY;
+          const newLeft = clamp(dragState.startLeft + dx, 0, dragState.bounds.width);
+          const newTop = clamp(dragState.startTop + dy, 0, dragState.bounds.height);
+          dragState.el.style.left = newLeft + 'px';
+          dragState.el.style.top = newTop + 'px';
+        }
+        function endDrag(e) {
+          if (!dragState) return;
+          dragState.el.releasePointerCapture(e.pointerId);
+          dragState.el.dataset.dragging = 'false';
+          // 位置確定
+          const id = dragState.el.dataset.id;
+          const m = markers.get(id);
+          if (m) {
+            m.x = parseFloat(dragState.el.style.left);
+            m.y = parseFloat(dragState.el.style.top);
+          }
+          dragState = null;
+        }
+        window.addEventListener('pointermove', onDrag);
+        window.addEventListener('pointerup', endDrag);
+
+        // ステージクリック：ダイアログが開いていたら閉じるだけ。閉じていて、かつマーカー外なら生成。
+        stage.addEventListener('click', (e) => {
+          // 画像が準備できてない場合は無視
+          if (img.hidden) return;
+
+          // マーカー上のクリックはここまで来ない（marker click で stopPropagation 済み）
+          if (dialogOpen()) {
+            // ダイアログを閉じて、今回はマーカー作成しない
+            closeDialog();
+            return;
+          }
+          // 画像内のみ作成
+          if (withinImage(e.clientX, e.clientY)) {
+            createMarkerAt(e.clientX, e.clientY);
+          }
+        });
+
+        // ダイアログのボタン
+        saveBtn.addEventListener('click', () => {
+          if (!currentDialogTarget) return;
+          const v = parseInt(numInput.value, 10);
+          if (Number.isFinite(v) && v > 0) {
+            currentDialogTarget.dataset.number = String(v);
+            currentDialogTarget.textContent = String(v);
+          }
+          closeDialog();
+        });
+        deleteBtn.addEventListener('click', () => {
+          if (!currentDialogTarget) return;
+          const id = currentDialogTarget.dataset.id;
+          currentDialogTarget.remove();
+          markers.delete(id);
+          closeDialog();
+        });
+
+        // ダイアログ外クリックで閉じる（ステージクリックとは独立）
+        window.addEventListener('click', (e) => {
+          if (!dialogOpen()) return;
+          if (e.target === dialog || dialog.contains(e.target)) return; // 内側
+          // ここで閉じるだけ。ステージクリック側は stop 済みで発火しないため二重動作なし
+          closeDialog();
+        });
+        // ESC で閉じる
+        window.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && dialogOpen()) closeDialog();
+          if (e.key === 'Enter' && dialogOpen()) saveBtn.click();
+        });
+
+        // 画像読み込み
+        file.addEventListener('change', (e) => {
+          const f = e.target.files && e.target.files[0];
+          if (!f) return;
+          const url = URL.createObjectURL(f);
+          img.src = url;
+          img.hidden = false;
+          empty.hidden = true;
+
+          // 既存マーカーをクリア
+          for (const { el } of markers.values()) el.remove();
+          markers.clear();
+          closeDialog();
+        });
+
+        // 画像のリサイズが起きたら、マーカーの位置は割合ではなくピクセル固定のためそのまま。
+        // object-fit: contain により画像矩形が変化するため、クリック・ドラッグ時に毎回最新の rect を参照する実装にしている。
+
+      })();
+    </script>
+  </body>
+
+</html>
