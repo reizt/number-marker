@@ -63,7 +63,7 @@
         overflow: hidden;
         display: grid;
         /* place-items: center; */
-        justify-content: center;
+        /* justify-content: center; */
         background: #111214;
       }
 
@@ -169,25 +169,17 @@
         border-color: #ef4444;
         color: white
       }
-
-      .empty-hint {
-        color: #9ca3af;
-        font-size: 14px;
-        text-align: center;
-        line-height: 1.8;
-      }
     </style>
   </head>
 
   <body>
     <header>
       <input id="file" type="file" accept="image/*" />
-      <button id="resetBtn" class="danger">リセット</button>
-      <div class="hint">画像を選択 → 画像内の任意の場所をクリックでマーカー作成（ダイアログが閉じているときのみ） / マーカーはドラッグで移動</div>
+      <button id="resetBtn" class="danger">マーカーをリセット</button>
+      <div class="hint">画像を選択 → クリックでマーカー作成 / 再クリックで編集・削除 / ドラッグで移動</div>
     </header>
 
     <div id="stage" class="stage" aria-label="キャンバス">
-      <div id="empty" class="empty-hint">ここに画像を読み込んでください<br />余白は常に margin: 32px で確保されます。</div>
       <img id="img" alt="選択画像" hidden />
     </div>
 
@@ -209,7 +201,6 @@
         const file = document.getElementById('file');
         const stage = document.getElementById('stage');
         const img = document.getElementById('img');
-        const empty = document.getElementById('empty');
 
         const dialog = document.getElementById('dialog');
         const numInput = document.getElementById('num');
@@ -496,7 +487,6 @@
           const url = URL.createObjectURL(f);
           img.src = url;
           img.hidden = false;
-          empty.hidden = true;
 
           // 既存マーカーをクリア
           for (const { el } of markers.values()) el.remove();
@@ -540,32 +530,26 @@
 
         async function restoreOnLoad() {
           const blob = await loadImageFromIDB();
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            img.src = url;
-            img.hidden = false;
-            empty.hidden = true;
-            // マーカーは画像の読み込み完了後に復元
-            img.onload = () => {
-              const states = loadMarkersFromLocalStorage();
-              for (const s of states) createMarkerFromState(s);
-            };
-          }
+          if (!blob) return;
+
+          const url = URL.createObjectURL(blob);
+          img.src = url;
+          img.hidden = false;
+          // マーカーは画像の読み込み完了後に復元
+          img.onload = () => {
+            const states = loadMarkersFromLocalStorage();
+            for (const s of states) createMarkerFromState(s);
+          };
         }
 
         // ===== リセット =====
         resetBtn.addEventListener('click', async () => {
           // ストレージ削除
           try { localStorage.removeItem(LS_KEY); } catch { /* noop */ }
-          await clearImageInIDB();
           // UI 初期化
           closeDialog();
           for (const { el } of markers.values()) el.remove();
           markers.clear();
-          img.removeAttribute('src');
-          img.hidden = true;
-          empty.hidden = false;
-          if (file) file.value = '';
         });
 
         // 初期化
